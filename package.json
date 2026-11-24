@@ -1,0 +1,52 @@
+{
+  "name": "magpie-junie",
+  "version": "0.1.0",
+  "description": "OpenCode provider plugin: JetBrains Junie for magpie (CLI credential reuse, browser PKCE, API key)",
+  "type": "module",
+  "main": "./index.mjs",
+  "bin": {
+    "magpie-junie-bridge": "./bridge-server.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "bridge-server.mjs",
+    "lib",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "magpie",
+    "magpie-plugin",
+    "junie",
+    "jetbrains",
+    "grazie",
+    "auth",
+    "provider"
+  ],
+  "license": "MIT",
+  "author": "aqiu817",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aqiu817/magpie-junie.git"
+  },
+  "homepage": "https://github.com/aqiu817/magpie-junie#readme",
+  "bugs": "https://github.com/aqiu817/magpie-junie/issues",
+  "magpie": {
+    "name": "Junie",
+    "icon": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Crect%20width='24'%20height='24'%20rx='5'%20fill='%23000'%2F%3E%3Cpath%20fill='%23fff'%20d='M6%206h3l6%206V6h3v12h-3L9%2012v6H6z'/%3E%3C%2Fsvg%3E",
+    "maxConcurrency": 2,
+    "summary": {
+      "en": "Use your JetBrains Junie subscription in magpie. Reuse the local CLI login, browser PKCE, or a perm-* key.",
+      "zh": "在 magpie 中使用 JetBrains Junie：复用本机 CLI 登录态、浏览器登录或 perm-* API key。"
+    }
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
