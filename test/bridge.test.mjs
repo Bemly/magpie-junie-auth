@@ -80,6 +80,11 @@ test("cleanResult keeps a user's own ### heading that is not an agent section", 
   assert.equal(cleanResult("解释一下 ### 是什么"), "解释一下 ### 是什么")
 })
 
+test("cleanResult strips a leading Changes section (no preceding newline)", () => {
+  assert.equal(cleanResult("### Changes\n- None.\n\n### Verification\n- ok."), "")
+  assert.equal(cleanResult("## Verification\n- done"), "")
+})
+
 test("usageFromLlmUsage sums tokens across calls", () => {
   const usage = usageFromLlmUsage([
     { model: "junie-lite/gpt-6-luna", calls: 7, cost: 0, inputTokens: 2287, cacheInputTokens: 9626, cacheCreateTokens: 10970, outputTokens: 522 },

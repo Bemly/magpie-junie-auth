@@ -158,7 +158,8 @@ export function cleanResult(result) {
   if (typeof result !== "string") return ""
   let cut = result.length
   for (const title of AGENT_SECTIONS) {
-    const re = new RegExp(`\\n#{1,3}\\s*${title}\\b`, "i")
+    // 支持标题在开头（^）或换行后（\n）；CLI 偶尔让模板段落在 result 最前面。
+    const re = new RegExp(`(?:^|\\n)#{1,3}\\s*${title}\\b`, "i")
     const m = re.exec(result)
     if (m && m.index < cut) cut = m.index
   }
