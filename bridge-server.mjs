@@ -146,8 +146,45 @@ export function callJunie(prompt, { model = MODEL, timeoutMs = TIMEOUT_MS, bin =
   })
 }
 
+/**
+ * Junie CLI 作为 coding agent，会在答案后固定附一段模板：
+ *   ### Changes\n- ...\n\n### Verification\n- ...  （有时还有 ### Notes）
+ * 对纯对话场景这些是噪音，从第一个已知段落标题起截断。
+ * 只匹配已知标题，避免用户正文里出现 "### " 时被误伤。
+ */
+const AGENT_SECTIONS = ["Changes", "Verification", "Notes"]
+
+export function cleanResult(result) {
+  if (typeof result !== "string") return ""
+  let cut = result.length
+  for (const title of AGENT_SECTIONS) {
+    const re = new RegExp(`\\n#{1,3}\\s*${title}\\b`, "i")
+    const m = re.exec(result)
+    if (m && m.index < cut) cut = m.index
+  }
+  return result.slice(0, cut).trim()
+}
+
+/** CLI llmUsage 数组 → OpenAI usage（缓存输入计入 prompt_tokens）。 */
+export function usageFromLlmUsage(llmUsage) {
+  let input = 0, output = 0, cacheRead = 0, cacheWrite = 0
+  for (const u of (Array.isArray(llmUsage) ? llmUsage : [])) {
+    input += Number(u?.inputTokens) || 0
+    output += Number(u?.outputTokens) || 0
+    cacheRead += Number(u?.cacheInputTokens) || 0
+    cacheWrite += Number(u?.cacheCreateTokens) || 0
+  }
+  const prompt = input + cacheRead + cacheWrite
+  return {
+    prompt_tokens: prompt,
+    completion_tokens: output,
+    total_tokens: prompt + output,
+    prompt_tokens_details: { cached_tokens: cacheRead, cache_write_tokens: cacheWrite },
+  }
+}
+
 /** OpenAI chat completion 响应体 */
-export function completionBody(result, model) {
+export function completionBody(result, model, usage) {
   return {
     id: `chatcmpl-${Date.now()}`,
     object: "chat.completion",
@@ -158,19 +195,20 @@ export function completionBody(result, model) {
       message: { role: "assistant", content: result },
       finish_reason: "stop",
     }],
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    usage: usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
   }
 }
 
-/** SSE 流式：CLI 不支持增量，把 result 切成块发出。 */
-export function streamChunks(result, model) {
+/** SSE 流式：CLI 不支持增量，把 result 切成块发出。usage 放最后一个 chunk。 */
+export function streamChunks(result, model, usage) {
   const id = `chatcmpl-${Date.now()}`
   const created = Math.floor(Date.now() / 1000)
-  const chunk = (delta, finish_reason = null) =>
-    `data: ${JSON.stringify({ id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`
+  const chunk = (delta, finish_reason = null, extra = {}) =>
+    `data: ${JSON.stringify({ id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta, finish_reason }], ...extra })}\n\n`
   const out = [chunk({ role: "assistant" })]
   for (let i = 0; i < result.length; i += 64) out.push(chunk({ content: result.slice(i, i + 64) }))
   out.push(chunk({}, "stop"))
+  out.push(chunk({}, null, { usage: usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }))
   out.push("data: [DONE]\n\n")
   return out.join("")
 }
@@ -197,19 +235,21 @@ export function createBridgeServer() {
         // 每次对话前按需检查版本（6h 节流），确保 CLI 不被上游版本门槛卡住。
         await maybeUpdate()
         const prompt = messagesToPrompt(body.messages)
-        const { result, errors } = await callJunie(prompt, { model: body.model && body.model !== "junie-lite" ? MODEL : MODEL })
+        const { result, errors, llmUsage } = await callJunie(prompt, { model: body.model && body.model !== "junie-lite" ? MODEL : MODEL })
         if (errors.length) {
           res.writeHead(400, { "Content-Type": "application/json" })
           res.end(JSON.stringify({ error: { message: errors.join("; "), type: "junie_error" } }))
           return
         }
         const replyModel = body.model ?? MODEL
+        const answer = cleanResult(result)
+        const usage = usageFromLlmUsage(llmUsage)
         if (body.stream) {
           res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" })
-          res.end(streamChunks(result, replyModel))
+          res.end(streamChunks(answer, replyModel, usage))
         } else {
           res.writeHead(200, { "Content-Type": "application/json" })
-          res.end(JSON.stringify(completionBody(result, replyModel)))
+          res.end(JSON.stringify(completionBody(answer, replyModel, usage)))
         }
         return
       }

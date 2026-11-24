@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { messagesToPrompt, parseCliOutput, decodeCliStdout, completionBody, streamChunks, modelsResponse } from "../bridge-server.mjs"
+import { messagesToPrompt, parseCliOutput, decodeCliStdout, cleanResult, usageFromLlmUsage, completionBody, streamChunks, modelsResponse } from "../bridge-server.mjs"
 
 test("messagesToPrompt keeps roles and flattens content parts", () => {
   const prompt = messagesToPrompt([
@@ -67,4 +67,38 @@ test("decodeCliStdout keeps UTF-8 bytes intact", () => {
   const b = Buffer.from('{"name":"英文 ok"}', "utf8")
   assert.equal(decodeCliStdout(b), '{"name":"英文 ok"}')
   assert.equal(parseCliOutput(b).name, "英文 ok")
+})
+
+
+test("cleanResult strips agent Changes/Verification/Notes sections", () => {
+  const raw = "今天天气不错。\n\n### Changes\n- 无代码变更。\n\n### Verification\n- 已确认。\n\n### Notes\n- 额外说明。"
+  assert.equal(cleanResult(raw), "今天天气不错。")
+  assert.equal(cleanResult("纯回答"), "纯回答")
+})
+
+test("cleanResult keeps a user's own ### heading that is not an agent section", () => {
+  assert.equal(cleanResult("解释一下 ### 是什么"), "解释一下 ### 是什么")
+})
+
+test("usageFromLlmUsage sums tokens across calls", () => {
+  const usage = usageFromLlmUsage([
+    { model: "junie-lite/gpt-6-luna", calls: 7, cost: 0, inputTokens: 2287, cacheInputTokens: 9626, cacheCreateTokens: 10970, outputTokens: 522 },
+    { inputTokens: 100, outputTokens: 50, cacheInputTokens: 20, cacheCreateTokens: 10 },
+  ])
+  assert.equal(usage.prompt_tokens, 2287 + 9626 + 10970 + 100 + 20 + 10)
+  assert.equal(usage.completion_tokens, 522 + 50)
+  assert.equal(usage.total_tokens, usage.prompt_tokens + usage.completion_tokens)
+  assert.equal(usage.prompt_tokens_details.cached_tokens, 9626 + 20)
+})
+
+test("completionBody carries provided usage", () => {
+  const usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+  assert.deepEqual(completionBody("hi", "junie-lite", usage).usage, usage)
+})
+
+test("streamChunks includes usage chunk before DONE", () => {
+  const usage = { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 }
+  const sse = streamChunks("hi", "junie-lite", usage)
+  assert.match(sse, /"usage":\{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18\}/)
+  assert.ok(sse.indexOf('"usage"') < sse.indexOf("data: [DONE]"))
 })
