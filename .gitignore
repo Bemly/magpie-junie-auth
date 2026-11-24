@@ -1,0 +1,10 @@
+# 本机专属配置（含真实账号、路径、端口），不进公开仓库
+LOCAL-SETUP.md
+
+# 依赖与运行产物
+node_modules/
+*.lock
+*.log
+.env
+.env.*
+*.pcap

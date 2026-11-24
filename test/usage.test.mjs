@@ -33,7 +33,8 @@ test("plugin hooks shape (config/auth/provider)", async () => {
   assert.equal(typeof hooks.config, "function")
   assert.equal(hooks.auth.provider, "junie")
   assert.equal(hooks.auth.methods.length, 3)
-  assert.equal(hooks.auth.methods[0].type, "api")
+  // CLI 导入用 oauth（完整保存 refresh/expires，magpie 才能续期/多账号轮换）
+  assert.equal(hooks.auth.methods[0].type, "oauth")
   assert.equal(hooks.auth.methods[2].type, "api")
   assert.equal(hooks.provider.id, "junie")
   assert.equal(typeof hooks.auth.refresh, "function")
@@ -47,7 +48,8 @@ test("config hook declares provider without overwriting user config", async () =
   assert.equal(cfg.provider.junie.api, "user-override")
   const fresh = {}
   await hooks.config(fresh)
-  assert.ok(fresh.provider.junie.models["claude-sonnet-4-6"])
+  // 直连/桥接都只提供免费档的 junie-lite（底层 GPT-6 Luna）
+  assert.ok(fresh.provider.junie.models["junie-lite"])
 })
 
 import { setFetchImpl, clearFetchImpl } from "../lib/proxy.mjs"

@@ -18,6 +18,7 @@ import { MODELS, configModels } from "./lib/models.mjs"
 import { readCliCredentials } from "./lib/credentials.mjs"
 import { startPkceLogin, refreshAccessToken } from "./lib/auth.mjs"
 import { makeFetch } from "./lib/fetch.mjs"
+import { makeDirectFetch, DIRECT_MODEL } from "./lib/direct.mjs"
 import { usageHook } from "./lib/usage.mjs"
 import { proxyFetch } from "./lib/proxy.mjs"
 
@@ -34,11 +35,12 @@ export async function JuniePlugin(input, options = {}) {
   return {
     config: async (cfg = {}) => {
       cfg.provider ??= {}
-      // 桥接模式下只暴露 CLI 能跑的模型。
+      // 直连和桥接都只暴露 junie-lite（底层 gpt-6-luna，免费额度）。
+      // 直连用 Responses 协议；桥接转发给本地 CLI。
       const opts = pluginOptions
-      const models = opts.bridgeUrl
-        ? { "junie-lite": { name: "Junie Lite (CLI)", limit: { context: 262144, output: 16384 }, tool_call: true } }
-        : configModels(opts)
+      const models = {
+        "junie-lite": { name: "Junie Lite (GPT-6 Luna)", limit: { context: 262144, output: 16384 }, tool_call: true },
+      }
       cfg.provider[PROVIDER] ??= {
         name: DISPLAY_NAME,
         npm: "@ai-sdk/openai-compatible", // chat completions
@@ -54,21 +56,35 @@ export async function JuniePlugin(input, options = {}) {
 
       methods: [
         {
-          type: "api",
+          // 用 oauth 而非 api：api 方法在 magpie 里只存 {type,key,metadata}，
+          // 丢掉 refresh/expires，导致无法自动续期、多账号里一个过期就卡住。
+          // oauth 走 plugin.Finish，完整保存 auth 对象。
+          type: "oauth",
           label: "从本机 Junie CLI 导入登录态",
           async authorize() {
-            const r = await readCliCredentials()
-            if (!r.ok) {
-              return { type: "failed", error: `未找到可用的 Junie CLI 登录态（${r.reason}）。` }
-            }
-            // api 的 authorize 支持直接返回 success（文档明确）；把 CLI 的 OAuth
-            // token 打包成 key 存起来。桥接模式不用它鉴权，但保留供直连模式使用。
+            // 本地读凭据，无需浏览器；callback 直接给出结果。
             return {
-              type: "success",
-              key: r.auth.access,
-              metadata: {
-                ...(r.auth.metadata ?? {}),
-                cliAuth: r.auth,
+              url: "",
+              instructions: "从本机 Junie CLI 读取登录态。",
+              method: "auto",
+              callback: async () => {
+                const r = await readCliCredentials()
+                if (!r.ok) return { type: "failed", error: `未找到可用的 Junie CLI 登录态（${r.reason}）。` }
+                return {
+                  type: "success",
+                  key: r.auth.access,
+                  access: r.auth.access,
+                  accessToken: r.auth.accessToken,
+                  idToken: r.auth.idToken,
+                  refresh: r.auth.refresh,
+                  expires: r.auth.expires,
+                  accountId: r.auth.accountId,
+                  metadata: {
+                    ...(r.auth.metadata ?? {}),
+                    email: r.auth.email ?? r.auth.accountId,
+                    cliAuth: r.auth,
+                  },
+                }
               },
             }
           },
@@ -117,10 +133,11 @@ export async function JuniePlugin(input, options = {}) {
             },
           }
         }
+        // 直连模式：用逆向的 Responses 协议（免费额度可用，无需 CLI 本体）。
         return {
           baseURL: "https://ingrazzio-cloud-prod.labs.jb.gg/v1",
           apiKey: auth.access ?? auth.key,
-          fetch: makeFetch(auth, options),
+          fetch: makeDirectFetch(auth, options),
         }
       },
 
@@ -139,10 +156,10 @@ export async function JuniePlugin(input, options = {}) {
         if (pluginOptions.bridgeUrl) {
           return { "junie-lite": { name: "Junie Lite (CLI)", limit: { context: 262144, output: 16384 }, tool_call: true } }
         }
-        // 模型目录来自 junie-api 抓包快照；真机探测到新 id 时在这里合并。
-        // 失败时保留原列表（magpie 约定）。
-        if (!auth) return providerModels
-        return { ...providerModels, ...configModels() }
+        // 直连/桥接都只提供 junie-lite（底层 gpt-6-luna），与其他旧模型无关。
+        return {
+          "junie-lite": { name: "Junie Lite (GPT-6 Luna)", limit: { context: 262144, output: 16384 }, tool_call: true },
+        }
       },
     },
   }

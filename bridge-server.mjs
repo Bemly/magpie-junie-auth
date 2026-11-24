@@ -20,7 +20,7 @@
 import { createServer } from "node:http"
 import { spawn } from "node:child_process"
 import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { tmpdir, homedir } from "node:os"
 import { join } from "node:path"
 import { checkAndUpdate } from "./lib/auto-update.mjs"
 
@@ -47,7 +47,10 @@ async function maybeUpdate() {
 
 const PORT = Number(process.env.PORT ?? 4141)
 const HOST = process.env.HOST ?? "127.0.0.1"
-const JUNIE = process.env.JUNIE_BIN ?? "C:\\Users\\Robin\\.local\\bin\\junie.bat"
+const DEFAULT_JUNIE = process.platform === "win32"
+  ? join(homedir(), ".local", "bin", "junie.bat")
+  : join(homedir(), ".local", "bin", "junie")
+const JUNIE = process.env.JUNIE_BIN ?? DEFAULT_JUNIE
 const MODEL = process.env.JUNIE_MODEL ?? "junie-lite"
 const TIMEOUT_MS = Number(process.env.JUNIE_TIMEOUT_MS ?? 120_000)
 
@@ -279,8 +282,9 @@ export function createBridgeServer() {
   })
 }
 
-// 直接运行时启动服务（ESM 入口检测）
-if (process.argv[1] && import.meta.url === new URL(`file:///${process.argv[1].replace(/\\/g, "/")}`).href) {
+// 直接运行时启动服务（ESM 入口检测；用 pathToFileURL 兼容 macOS/Linux 绝对路径）
+import { pathToFileURL } from "node:url"
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const server = createBridgeServer()
   server.listen(PORT, HOST, () => {
     console.log(`junie-openai bridge listening on http://${HOST}:${PORT}/v1 (model=${MODEL})`)
