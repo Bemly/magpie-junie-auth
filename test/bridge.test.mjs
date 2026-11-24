@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { messagesToPrompt, parseCliOutput, completionBody, streamChunks, modelsResponse } from "../bridge-server.mjs"
+import { messagesToPrompt, parseCliOutput, decodeCliStdout, completionBody, streamChunks, modelsResponse } from "../bridge-server.mjs"
 
 test("messagesToPrompt keeps roles and flattens content parts", () => {
   const prompt = messagesToPrompt([
@@ -48,4 +48,23 @@ test("streamChunks emits role, content chunks and [DONE]", () => {
 test("modelsResponse exposes junie-lite", () => {
   const r = modelsResponse()
   assert.ok(r.data.some((m) => m.id === "junie-lite"))
+})
+
+
+test("decodeCliStdout decodes GBK bytes from Chinese Windows CLI", () => {
+  // 真实捕获的 GBK 字节（"用中文回答“你好"）+ ASCII JSON 结构
+  const gbkJson = Buffer.from(
+    "7b226e616d65223a22" + "d3c3d6d0cec4bbd8b4f0a1b0c4e3bac3" + "222c226572726f7273223a5b5d7d",
+    "hex",
+  )
+  const decoded = decodeCliStdout(gbkJson)
+  assert.match(decoded, /用中文回答/)
+  const obj = parseCliOutput(gbkJson)
+  assert.equal(obj.name, "用中文回答“你好")
+})
+
+test("decodeCliStdout keeps UTF-8 bytes intact", () => {
+  const b = Buffer.from('{"name":"英文 ok"}', "utf8")
+  assert.equal(decodeCliStdout(b), '{"name":"英文 ok"}')
+  assert.equal(parseCliOutput(b).name, "英文 ok")
 })

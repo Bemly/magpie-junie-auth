@@ -64,9 +64,23 @@ export function messagesToPrompt(messages) {
   }).join("\n\n")
 }
 
-/** 从 CLI stdout 里找最后一个 JSON 对象行并解析。 */
+/**
+ * 从 CLI stdout 里找最后一个 JSON 对象行并解析。
+ *
+ * 编码坑（2026-11-24 实测）：中文 Windows 上 CLI 的 stdout 是 **GBK** 字节
+ * （JSON 结构 ASCII + 中文 GBK 双字节），按 UTF-8 解码会得到 "Ŀǰ..." 乱码。
+ * 策略：先把 Buffer 按 UTF-8 解，若出现替换字符（U+FFFD）说明不是 UTF-8，
+ * 改用 GBK（TextDecoder('gbk')，Node 24 ICU 支持；GBK 兼容 ASCII，结构不受影响）。
+ */
+export function decodeCliStdout(stdout) {
+  const buf = Buffer.isBuffer(stdout) ? stdout : Buffer.from(String(stdout), "utf8")
+  const utf8 = buf.toString("utf8")
+  if (!utf8.includes("\uFFFD")) return utf8
+  try { return new TextDecoder("gbk").decode(buf) } catch { return utf8 }
+}
+
 export function parseCliOutput(stdout) {
-  const lines = String(stdout).split(/\r?\n/)
+  const lines = decodeCliStdout(stdout).split(/\r?\n/)
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim()
     if (!line.startsWith("{")) continue
@@ -83,6 +97,8 @@ export function callJunie(prompt, { model = MODEL, timeoutMs = TIMEOUT_MS, bin =
   return new Promise((resolve, reject) => {
     const dir = mkdtempSync(join(tmpdir(), "magpie-junie-"))
     const stdinPath = join(dir, "prompt.txt")
+    // prompt 用 UTF-8 写：实测 CLI 从真实文件 stdin 读 UTF-8 中文能正确理解
+    // （"函数不正确"是 pipe stdin 的问题，与编码无关）。
     writeFileSync(stdinPath, prompt, "utf8")
     let fd
     try { fd = openSync(stdinPath, "r") } catch (err) { rmSync(dir, { recursive: true, force: true }); return reject(err) }
@@ -97,7 +113,10 @@ export function callJunie(prompt, { model = MODEL, timeoutMs = TIMEOUT_MS, bin =
       stdio: [fd, "pipe", "pipe"],
     })
     closeSync(fd)
-    let stdout = "", stderr = "", done = false
+    // 必须累积 Buffer：中文 Windows 上 CLI stdout 是 GBK 字节，
+    // 若用 `stdout += c`（Buffer 隐式 toString/utf8）会在这一步就破坏原始字节。
+    const outChunks = [], errChunks = []
+    let done = false
     const timer = setTimeout(() => child.kill(), timeoutMs)
     const finish = (err, value) => {
       if (done) return
@@ -106,13 +125,14 @@ export function callJunie(prompt, { model = MODEL, timeoutMs = TIMEOUT_MS, bin =
       rmSync(dir, { recursive: true, force: true })
       err ? reject(err) : resolve(value)
     }
-    child.stdout?.on("data", (c) => { stdout += c })
-    child.stderr?.on("data", (c) => { stderr += c })
+    child.stdout?.on("data", (c) => outChunks.push(c))
+    child.stderr?.on("data", (c) => errChunks.push(c))
     child.on("error", (err) => finish(err))
     child.on("close", (code) => {
       try {
-        const obj = parseCliOutput(stdout)
-        if (!obj) return finish(new Error(`CLI exited ${code} without JSON: ${(stdout || stderr).slice(0, 400)}`))
+        const stdoutBuf = Buffer.concat(outChunks)
+        const obj = parseCliOutput(stdoutBuf)
+        if (!obj) return finish(new Error(`CLI exited ${code} without JSON: ${decodeCliStdout(stdoutBuf || Buffer.concat(errChunks)).slice(0, 400)}`))
         finish(null, {
           code,
           obj,
