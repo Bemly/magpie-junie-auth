@@ -32,10 +32,15 @@ test("plugin hooks shape (config/auth/provider)", async () => {
   const hooks = await JuniePlugin()
   assert.equal(typeof hooks.config, "function")
   assert.equal(hooks.auth.provider, "junie")
-  assert.equal(hooks.auth.methods.length, 3)
+  assert.equal(hooks.auth.methods.length, 4)
   // CLI 导入用 oauth（完整保存 refresh/expires，magpie 才能续期/多账号轮换）
   assert.equal(hooks.auth.methods[0].type, "oauth")
   assert.equal(hooks.auth.methods[2].type, "api")
+  // 第 4 个：直接粘贴 refresh token，prompts + authorize → 宿主标记 keyAsked
+  const rt = hooks.auth.methods[3]
+  assert.equal(rt.type, "api")
+  assert.equal(rt.prompts?.[0]?.key, "refresh")
+  assert.equal(typeof rt.authorize, "function")
   assert.equal(hooks.provider.id, "junie")
   assert.equal(typeof hooks.auth.refresh, "function")
   assert.equal(typeof hooks.auth.usage, "function")

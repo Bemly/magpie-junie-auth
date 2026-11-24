@@ -18,6 +18,7 @@
 1. **从本机 Junie CLI 导入登录态** —— 读取已登录 CLI 的 OAuth 凭据：macOS 从 Keychain（`security`，service `junie-cli`），Windows 从 `~/.junie/dpapi_credentials/*.dpapi`（DPAPI）。刷新令牌与过期时间会完整保存，便于自动续期。
 2. **浏览器登录（JetBrains 账号）** —— 复刻 CLI 的 PKCE 授权码流程，本地回调端口 62345–62364。
 3. **API key (`perm-*`)** —— 从 https://junie.jetbrains.com/cli 获取。
+4. **Refresh token (`oW66…` / `fHx…` / `8Sl…`)** —— 直接粘贴 JetBrains OAuth refresh token，插件自动换取 access token 并完整保存 refresh/expires/email，无需浏览器或本机 CLI。
 
 凭据存在 magpie 的 `plugin-auth.json`（权限 600）。`auth.refresh` 在到期前 90 秒自动续期；账号额度耗尽时 magpie 自动切到下一个。
 

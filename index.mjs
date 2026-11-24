@@ -1,9 +1,10 @@
 // magpie-junie：把 JetBrains Junie 接入 magpie 供应商 `junie`。
 //
-// 三种登录方式（按优先级）：
-//   1. 导入本机 CLI 登录态（~/.junie/dpapi_credentials，DPAPI 解密）——最快，不用浏览器
+// 四种登录方式（按优先级）：
+//   1. 导入本机 CLI 登录态（macOS Keychain / Windows DPAPI）——最快，不用浏览器
 //   2. 浏览器 PKCE（Junie CLI 同款）——没有本地 CLI 时用
-//   3. API key（perm-*，从 junie.jetbrains.com/cli 获取）——兜底
+//   3. API key（perm-*，从 junie.jetbrains.com/cli 获取）
+//   4. 直接粘贴 OAuth refresh token（oW66… / fHx… / 8Sl…）——换取并完整保存
 //
 // 请求链路（两种，由 options.bridgeUrl 选择）：
 //   A. 直连上游：loader.fetch 把标准请求发到 ingrazzio-cloud-prod.labs.jb.gg
@@ -16,7 +17,7 @@
 import { PROVIDER, DISPLAY_NAME } from "./lib/constants.mjs"
 import { MODELS, configModels } from "./lib/models.mjs"
 import { readCliCredentials } from "./lib/credentials.mjs"
-import { startPkceLogin, refreshAccessToken } from "./lib/auth.mjs"
+import { startPkceLogin, refreshAccessToken, signInWithRefreshToken } from "./lib/auth.mjs"
 import { makeFetch } from "./lib/fetch.mjs"
 import { makeDirectFetch, DIRECT_MODEL } from "./lib/direct.mjs"
 import { usageHook } from "./lib/usage.mjs"
@@ -110,6 +111,22 @@ export async function JuniePlugin(input, options = {}) {
           type: "api",
           label: "Junie API key (perm-*)",
           placeholder: "perm-…",
+        },
+        {
+          // 直接粘贴 OAuth refresh token（oW66… / fHx… / 8Sl…）：
+          // prompts + authorize 让宿主标记 keyAsked，magpie 不再额外问 key。
+          type: "api",
+          label: "Refresh token (oW66… / fHx…)",
+          prompts: [
+            { type: "password", key: "refresh", message: "Junie refresh token" },
+          ],
+          async authorize(inputs = {}) {
+            try {
+              return await signInWithRefreshToken(inputs.refresh)
+            } catch (err) {
+              return { type: "failed", error: `refresh token 无效或上游拒绝：${String(err?.message ?? err).slice(0, 300)}` }
+            }
+          },
         },
       ],
 
