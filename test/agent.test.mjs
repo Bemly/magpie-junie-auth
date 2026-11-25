@@ -259,14 +259,20 @@ test("SSE: output_text.done 补齐缺失的 delta 文本", () => {
   assert.equal(texts.join(""), "HELLO") // 不重复
 })
 
-test("SSE: 上游 failed/error 事件透出原因而非空成功", () => {
+test("SSE: 上游 failed/error 发 error 帧而非文本回复（magpie 可区分）", () => {
   const sse = [
-    'data: {"type":"response.failed","response":{"error":{"message":"rate limited"}}}',
+    'data: {"type":"response.failed","response":{"error":{"message":"rate limited","type":"rate_limit_error","code":429}}}',
     "",
   ].join("\n")
   const out = new TextDecoder().decode(responsesSSEToChatSSE(new TextEncoder().encode(sse)))
-  assert.match(out, /rate limited/)
-  assert.match(out, /\[DONE\]/)
+  const frames = out.split(/\n\n/).filter(Boolean).map((s) => s.replace(/^data: /, "")).filter((s) => s !== "[DONE]").map((s) => JSON.parse(s))
+  const err = frames.find((f) => f.error)
+  assert.ok(err, "应有一个 error 帧")
+  assert.equal(err.error.message, "rate limited")
+  assert.equal(err.error.type, "rate_limit_error")
+  assert.equal(err.error.code, 429)
+  assert.ok(!frames.some((f) => f.choices?.[0]?.delta?.content?.includes("rate limited")), "错误不该作为文本回复")
+  assert.ok(out.includes("[DONE]"))
 })
 
 test("fromResponsesJSON: HTTP 200 但 error 字段不吞", () => {
