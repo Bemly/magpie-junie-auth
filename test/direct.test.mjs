@@ -34,6 +34,7 @@ test("toResponsesBody 用 wireName 与 Responses 字段", () => {
   assert.equal(b.store, false)
   assert.deepEqual(b.text, { format: { type: "text" } })
   assert.deepEqual(b.reasoning, { effort: "low" })
+  assert.equal(b.prompt_cache_retention, "24h")
 })
 
 test("fromResponsesJSON 取 output_text", () => {

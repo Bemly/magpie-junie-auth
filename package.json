@@ -1,6 +1,6 @@
 {
   "name": "magpie-junie-auth",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "magpie provider plugin: JetBrains Junie free tier (gpt-6-luna) via direct Responses API or CLI bridge; multi-account with browser PKCE / CLI login reuse",
   "type": "module",
   "main": "./index.mjs",

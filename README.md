@@ -48,6 +48,8 @@ magpie accounts switch junie <email>   # 切换默认
 
 `temperature`/`top_p`/`stop_sequences` 会被该免费模型拒绝，故主动丢弃；`parallel_tool_calls` 与 `response_format` 会转发。`n>1` 降级为单候选（Responses 无多候选概念）。
 
+**提示缓存**：免费档支持 prompt cache。请求带 `prompt_cache_retention:"24h"`（CLI 抓包原值）；稳定前缀 ≥ ~1024 token 才会写/命中（实测 2838 token 前缀：首请求 `cache_write_tokens:2835`，后续 `cached_tokens:2835`）。上游的 `cached_tokens`/`cache_write_tokens` 会透传到 chat usage 的 `prompt_tokens_details`，magpie 用量页能显示 cache read 与命中率。
+
 额度显示走 `GET /auth/test`：`plan` = licenseType、`balance` = balanceLeft + unit。上游不提供窗口百分比，`windows` 留空（不编造 `used: 0`）。
 
 ## 安装

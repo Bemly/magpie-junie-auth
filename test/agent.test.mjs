@@ -4,7 +4,7 @@ import assert from "node:assert/strict"
 import {
   toResponsesInput, toResponsesBody, toResponsesTools,
   fromResponsesJSON, responsesSSEToChatSSE, responseEventToChatChunks,
-  makeDirectFetch,
+  makeDirectFetch, toChatUsage,
 } from "../lib/direct.mjs"
 import { setFetchImpl, clearFetchImpl } from "../lib/proxy.mjs"
 
@@ -369,4 +369,18 @@ test("directFetch 非流式：请求体含 tools，响应含 tool_calls", async 
   } finally {
     clearFetchImpl()
   }
+})
+
+test("toChatUsage 透传缓存命中字段（cached_tokens / cache_write_tokens）", () => {
+  const u = toChatUsage({
+    input_tokens: 100, output_tokens: 20, total_tokens: 120,
+    input_tokens_details: { cached_tokens: 80, cache_write_tokens: 10 },
+    output_tokens_details: { reasoning_tokens: 5 },
+  })
+  assert.equal(u.prompt_tokens_details.cached_tokens, 80)
+  assert.equal(u.prompt_tokens_details.cache_write_tokens, 10)
+  assert.equal(u.completion_tokens_details.reasoning_tokens, 5)
+  // 无缓存字段时不凭空造
+  const plain = toChatUsage({ input_tokens: 1, output_tokens: 2, total_tokens: 3 })
+  assert.equal(plain.prompt_tokens_details, undefined)
 })
