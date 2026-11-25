@@ -27,3 +27,15 @@ test("refreshAccessToken maps invalid_grant to signIn expired", async () => {
     )
   } finally { clearFetchImpl() }
 })
+
+test("refreshAccessToken keeps key in sync with access", async () => {
+  setFetchImpl(async () => new Response(JSON.stringify({
+    id_token: "new-access", access_token: "at", refresh_token: "new-refresh", expires_in: 3600,
+  })))
+  try {
+    const r = await refreshAccessToken({ type: "oauth", access: "old", key: "old", refresh: "R" })
+    assert.equal(r.key, "new-access")
+    assert.equal(r.access, "new-access")
+    assert.equal(r.refresh, "new-refresh")
+  } finally { clearFetchImpl() }
+})

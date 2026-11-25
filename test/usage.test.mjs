@@ -99,3 +99,15 @@ test("bridge mode: provider.models returns only junie-lite", async () => {
   const models = await hooks.provider.models({})
   assert.deepEqual(Object.keys(models), ["junie-lite"])
 })
+
+test("direct mode: loader with no auth returns 401 instead of throwing", async () => {
+  const hooks = await JuniePlugin()
+  for (const auth of [null, undefined, { type: "oauth" }]) {
+    const loader = await hooks.auth.loader(async () => auth)
+    assert.ok(loader.apiKey !== undefined)
+    const res = await loader.fetch("http://x/v1/chat/completions", { method: "POST", body: "{}" })
+    assert.equal(res.status, 401)
+    const j = await res.json()
+    assert.match(j.error.message, /尚未登录|未登录/)
+  }
+})

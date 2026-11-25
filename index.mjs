@@ -151,6 +151,17 @@ export async function JuniePlugin(input, options = {}) {
           }
         }
         // 直连模式：用逆向的 Responses 协议（免费额度可用，无需 CLI 本体）。
+        // auth 可能为空（未登录/账号状态异常/轮换间隙），此时给出明确错误，
+        // 而不是让 `auth.access` 抛 TypeError 使整个 loader 崩掉。
+        if (!auth || (!auth.access && !auth.key)) {
+          return {
+            baseURL: "https://ingrazzio-cloud-prod.labs.jb.gg/v1",
+            apiKey: "",
+            fetch: async () => new Response(JSON.stringify({
+              error: { message: "Junie 尚未登录，请在 magpie 里添加/切换账号（magpie accounts junie）", type: "auth_error" },
+            }), { status: 401, headers: { "Content-Type": "application/json" } }),
+          }
+        }
         return {
           baseURL: "https://ingrazzio-cloud-prod.labs.jb.gg/v1",
           apiKey: auth.access ?? auth.key,
