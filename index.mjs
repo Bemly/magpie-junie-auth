@@ -181,15 +181,16 @@ export async function JuniePlugin(input, options = {}) {
     provider: {
       id: PROVIDER,
       async models(providerModels, { auth } = {}) {
-        // gpt-6-luna 真机验证支持图片输入（data URI / URL），
-        // 声明 modalities 后 magpie 才会把它列进「识图模型」。
-        const modalities = { input: ["text", "image"], output: ["text"] }
+        // gpt-6-luna 真机验证支持图片输入（data URI / URL）。
+        // magpie 识别图片能力看 capabilities.input（不是 modalities）——
+        // 缺了它 provider 的 images=false，模型不会列进「识图模型」。
+        const capabilities = { toolcall: true, attachment: true, input: { text: true, image: true }, output: { text: true } }
         if (pluginOptions.bridgeUrl) {
-          return { "junie-lite": { name: "Junie Lite (CLI)", limit: { context: 262144, output: 16384 }, tool_call: true, modalities } }
+          return { "junie-lite": { name: "Junie Lite (CLI)", limit: { context: 262144, output: 16384 }, tool_call: true, capabilities } }
         }
         // 直连/桥接都只提供 junie-lite（底层 gpt-6-luna），与其他旧模型无关。
         return {
-          "junie-lite": { name: "Junie Lite (GPT-6 Luna)", limit: { context: 262144, output: 16384 }, tool_call: true, modalities },
+          "junie-lite": { name: "Junie Lite (GPT-6 Luna)", limit: { context: 262144, output: 16384 }, tool_call: true, capabilities },
         }
       },
     },

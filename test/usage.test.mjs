@@ -112,11 +112,12 @@ test("direct mode: loader with no auth returns 401 instead of throwing", async (
   }
 })
 
-test("junie-lite declares image input so it appears in magpie vision models", async () => {
+test("junie-lite declares image capability so it appears in magpie vision models", async () => {
   const hooks = await JuniePlugin()
   const models = await hooks.provider.models({})
   const m = models["junie-lite"]
-  assert.ok(m.modalities?.input?.includes("image"))
-  assert.ok(m.modalities?.input?.includes("text"))
-  assert.ok(m.modalities?.output?.includes("text"))
+  // magpie reads capabilities.input (not modalities) from a plugin's models hook
+  assert.equal(m.capabilities.input.image, true)
+  assert.equal(m.capabilities.input.text, true)
+  assert.equal(m.capabilities.attachment, true)
 })
