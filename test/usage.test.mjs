@@ -111,3 +111,12 @@ test("direct mode: loader with no auth returns 401 instead of throwing", async (
     assert.match(j.error.message, /尚未登录|未登录/)
   }
 })
+
+test("junie-lite declares image input so it appears in magpie vision models", async () => {
+  const hooks = await JuniePlugin()
+  const models = await hooks.provider.models({})
+  const m = models["junie-lite"]
+  assert.ok(m.modalities?.input?.includes("image"))
+  assert.ok(m.modalities?.input?.includes("text"))
+  assert.ok(m.modalities?.output?.includes("text"))
+})
