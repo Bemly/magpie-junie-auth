@@ -43,6 +43,14 @@ test("assistant.tool_calls 与 role:tool 转成 Responses item（不再是空 co
   assert.deepEqual(input[2], { type: "function_call_output", call_id: "call_1", output: "sunny" })
 })
 
+test("assistant tool_call 的 arguments 为对象时转成 JSON 字符串", () => {
+  const { input } = toResponsesInput([{ role: "assistant", tool_calls: [
+    { id: "c1", type: "function", function: { name: "f", arguments: { city: "SF" } } },
+  ] }])
+  assert.equal(typeof input[0].arguments, "string")
+  assert.deepEqual(JSON.parse(input[0].arguments), { city: "SF" })
+})
+
 test("多模态 content parts 映射为 input_text / input_image，不静默丢", () => {
   const { input } = toResponsesInput([{ role: "user", content: [
     { type: "text", text: "看图" },
@@ -51,6 +59,20 @@ test("多模态 content parts 映射为 input_text / input_image，不静默丢"
   const parts = input[0].content
   assert.deepEqual(parts[0], { type: "input_text", text: "看图" })
   assert.deepEqual(parts[1], { type: "input_image", image_url: "data:image/png;base64,AAA", detail: "high" })
+})
+
+test("toResponsesBody 只转发上游支持的字段；temperature/top_p/stop 主动丢弃", () => {
+  const b = toResponsesBody({
+    messages: [],
+    temperature: 0.2, top_p: 0.9, parallel_tool_calls: false, stop: ["END"],
+    response_format: { type: "json_schema", json_schema: { name: "out", schema: { type: "object" } } },
+  })
+  // gpt-6-luna 不支持这些，转发会 400
+  assert.equal(b.temperature, undefined)
+  assert.equal(b.top_p, undefined)
+  assert.equal(b.stop_sequences, undefined)
+  assert.equal(b.parallel_tool_calls, false)
+  assert.deepEqual(b.text.format, { type: "json_schema", name: "out", schema: { type: "object" } })
 })
 
 test("fromResponsesJSON 把 function_call 转回 tool_calls，finish_reason=tool_calls", () => {
@@ -162,6 +184,161 @@ test("directFetch 流式处理上游 CRLF 分隔的 SSE（真机上游用 \\r\\n
   } finally {
     clearFetchImpl()
   }
+})
+
+test("SSE: 上游不发 output_item.added 时 delta 仍能建立 tool index", () => {
+  const sse = [
+    'data: {"type":"response.function_call_arguments.delta","item_id":"it1","delta":"{}"}',
+    "",
+    'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}',
+    "",
+  ].join("\n")
+  const out = new TextDecoder().decode(responsesSSEToChatSSE(new TextEncoder().encode(sse)))
+  assert.match(out, /"tool_calls":\[{"index":0/)
+  assert.match(out, /"finish_reason":"tool_calls"/)
+})
+
+test("SSE: function_call_arguments.done 补齐缺失的 delta", () => {
+  const sse = [
+    'data: {"type":"response.output_item.added","item":{"id":"it1","type":"function_call","call_id":"c1","name":"f","arguments":""}}',
+    "",
+    'data: {"type":"response.function_call_arguments.done","item_id":"it1","arguments":"{\\"a\\":1}"}',
+    "",
+    'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}',
+    "",
+  ].join("\n")
+  const out = new TextDecoder().decode(responsesSSEToChatSSE(new TextEncoder().encode(sse)))
+  assert.match(out, /\\"a\\":1/)  // JSON 字符串里引号被转义
+})
+
+test("fromResponsesJSON: incomplete+max_output_tokens → finish_reason=length", () => {
+  const c = fromResponsesJSON({
+    status: "incomplete", status_details: { reason: "max_output_tokens" },
+    output: [{ type: "message", content: [{ type: "output_text", text: "hi" }] }],
+  }, "junie-lite")
+  assert.equal(c.choices[0].finish_reason, "length")
+})
+
+test("fromResponsesJSON: refusal 内容不被丢成空文本", () => {
+  const c = fromResponsesJSON({
+    output: [{ type: "message", content: [{ type: "refusal", refusal: "I refuse" }] }],
+  }, "junie-lite")
+  assert.match(c.choices[0].message.content, /refusal: I refuse/)
+})
+
+test("SSE: response.incomplete 按 status_details 给 length", () => {
+  const sse = [
+    'data: {"type":"response.incomplete","response":{"status":"incomplete","status_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}',
+    "",
+  ].join("\n")
+  const out = new TextDecoder().decode(responsesSSEToChatSSE(new TextEncoder().encode(sse)))
+  assert.match(out, /"finish_reason":"length"/)
+})
+
+test("fromResponsesJSON: reasoning summary → reasoning_content，不进 content", () => {
+  const c = fromResponsesJSON({
+    output: [
+      { type: "reasoning", summary: [{ type: "summary_text", text: "step1" }, { type: "summary_text", text: "step2" }] },
+      { type: "message", content: [{ type: "output_text", text: "answer" }] },
+    ],
+  }, "junie-lite")
+  assert.equal(c.choices[0].message.content, "answer")
+  assert.equal(c.choices[0].message.reasoning_content, "step1\nstep2")
+})
+
+test("SSE: output_text.done 补齐缺失的 delta 文本", () => {
+  const sse = [
+    'data: {"type":"response.output_text.done","text":"HELLO"}',
+    "",
+    'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}',
+    "",
+  ].join("\n")
+  const out = new TextDecoder().decode(responsesSSEToChatSSE(new TextEncoder().encode(sse)))
+  assert.match(out, /"content":"HELLO"/)
+  const texts = [...out.matchAll(/"content":"([^"]*)"/g)].map((m) => m[1])
+  assert.equal(texts.join(""), "HELLO") // 不重复
+})
+
+test("SSE: 上游 failed/error 事件透出原因而非空成功", () => {
+  const sse = [
+    'data: {"type":"response.failed","response":{"error":{"message":"rate limited"}}}',
+    "",
+  ].join("\n")
+  const out = new TextDecoder().decode(responsesSSEToChatSSE(new TextEncoder().encode(sse)))
+  assert.match(out, /rate limited/)
+  assert.match(out, /\[DONE\]/)
+})
+
+test("fromResponsesJSON: HTTP 200 但 error 字段不吞", () => {
+  const c = fromResponsesJSON({ status: "failed", error: { message: "no license" }, output: [] }, "junie-lite")
+  assert.match(c.choices[0].message.content, /no license/)
+})
+
+test("directFetch 错误响应透传 retry-after", async () => {
+  setFetchImpl(async () => new Response('{"error":"429"}', {
+    status: 429,
+    headers: { "retry-after": "30", "x-ratelimit-remaining-requests": "0" },
+  }))
+  try {
+    const fetch = makeDirectFetch({ access: "tok" })
+    const res = await fetch("http://x/v1/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({ model: "junie-lite", messages: [] }),
+    })
+    assert.equal(res.status, 429)
+    assert.equal(res.headers.get("retry-after"), "30")
+    assert.equal(res.headers.get("x-ratelimit-remaining-requests"), "0")
+  } finally {
+    clearFetchImpl()
+  }
+})
+
+test("system 含图片时保留在 input 而非塞进 instructions 丢失", () => {
+  const { input, instructions } = toResponsesInput([{ role: "system", content: [
+    { type: "text", text: "SYS" },
+    { type: "image_url", image_url: { url: "data:image/png;base64,X" } },
+  ] }])
+  assert.equal(instructions, undefined)
+  assert.equal(input.length, 1)
+  assert.equal(input[0].role, "system")
+  assert.deepEqual(input[0].content[1], { type: "input_image", image_url: "data:image/png;base64,X" })
+})
+
+test("directFetch 流式请求但上游返回纯 JSON 时不丢内容", async () => {
+  setFetchImpl(async () => new Response(JSON.stringify({
+    id: "resp_x", created_at: 1,
+    output: [{ type: "message", content: [{ type: "output_text", text: "FALLBACK" }] }],
+    usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+  }), { status: 200, headers: { "Content-Type": "application/json" } }))
+  try {
+    const fetch = makeDirectFetch({ access: "tok" })
+    const res = await fetch("http://x/v1/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({ model: "junie-lite", stream: true, messages: [{ role: "user", content: "hi" }] }),
+    })
+    const text = await new Response(res.body).text()
+    assert.match(text, /FALLBACK/)
+    assert.match(text, /\[DONE\]/)
+  } finally {
+    clearFetchImpl()
+  }
+})
+
+test("SSE 混用 LF/CRLF 分隔符时不丢帧、顺序正确", () => {
+  const sse = [
+    'data: {"type":"response.output_text.delta","delta":"A"}', "",
+    'data: {"type":"response.output_text.delta","delta":"B"}', "",
+    'data: {"type":"response.output_text.delta","delta":"C"}', "",
+  ].join("\n").replace('"delta":"B"}\n', '"delta":"B"}\r\n') // 混入 CRLF 帧
+  const out = new TextDecoder().decode(responsesSSEToChatSSE(new TextEncoder().encode(sse)))
+  const texts = [...out.matchAll(/"content":"([ABC])"/g)].map((m) => m[1])
+  assert.deepEqual(texts, ["A", "B", "C"])
+})
+
+test("SSE 最后一帧无结尾空行也处理", () => {
+  const sse = 'data: {"type":"response.output_text.delta","delta":"LAST"}'
+  const out = new TextDecoder().decode(responsesSSEToChatSSE(new TextEncoder().encode(sse)))
+  assert.match(out, /"content":"LAST"/)
 })
 
 test("directFetch 非流式：请求体含 tools，响应含 tool_calls", async () => {

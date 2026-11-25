@@ -39,7 +39,14 @@ magpie accounts switch junie <email>   # 切换默认
 | 直连 | `POST /v1/responses` | `gpt-6-luna` | 否 |
 | 桥接 | 本地 `POST /v1/chat/completions` → CLI headless | `junie-lite` | 是 |
 
-对客户端统一暴露 OpenAI Chat Completions（流式 SSE 与非流式均支持）。插件内部把 chat completions 转成 Responses API，再把响应转回。
+对客户端统一暴露 OpenAI Chat Completions（流式 SSE 与非流式均支持）。插件内部把 chat completions 转成 Responses API，再把响应转回，完整支持 agent 所需能力：
+
+- **工具调用双向**：`tools`/`tool_choice` 转发；assistant `tool_calls` ↔ Responses `function_call`，`role:"tool"` ↔ `function_call_output`；多工具并行、`finish_reason:"tool_calls"`。
+- **真流式**：边读边转，不缓冲整段；流末尾带 usage。
+- **多模态输入**：图片等 content parts 保留为 `input_image`。
+- 兼容 SSE 的 LF/CRLF 混用、缺失事件（delta 丢失时用 done 补齐）、上游错误/拒绝与 `finish_reason:"length"`（`max_output_tokens` 截断）。
+
+`temperature`/`top_p`/`stop_sequences` 会被该免费模型拒绝，故主动丢弃；`parallel_tool_calls` 与 `response_format` 会转发。`n>1` 降级为单候选（Responses 无多候选概念）。
 
 额度显示走 `GET /auth/test`：`plan` = licenseType、`balance` = balanceLeft + unit。上游不提供窗口百分比，`windows` 留空（不编造 `used: 0`）。
 
