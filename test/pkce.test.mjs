@@ -2,7 +2,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { generatePKCE, buildAuthUrl, refreshAccessToken } from "../lib/auth.mjs"
+import { generatePKCE, buildAuthUrl, refreshAccessToken, _internal } from "../lib/auth.mjs"
 
 test("generatePKCE: verifier/challenge length + sha256 relation", () => {
   const { codeVerifier, codeChallenge } = generatePKCE()
@@ -38,4 +38,34 @@ test("refreshAccessToken keeps key in sync with access", async () => {
     assert.equal(r.access, "new-access")
     assert.equal(r.refresh, "new-refresh")
   } finally { clearFetchImpl() }
+})
+
+// 回归：浏览器会自动请求 favicon.ico 等无关路径，回调 server 不能因此二次 writeHead。
+test("callback server answers unrelated paths once, then resolves the code", async () => {
+  const { server, port, callback } = await _internal.startCallbackServer()
+  try {
+    const notFound = await fetch(`http://localhost:${port}/favicon.ico`)
+    assert.equal(notFound.status, 404)
+    await notFound.text()
+
+    const ok = await fetch(`http://localhost:${port}/?code=C&state=S`)
+    assert.equal(ok.status, 200)
+    await ok.text()
+
+    assert.deepEqual(await callback, { code: "C", state: "S" })
+  } finally {
+    server.close()
+  }
+})
+
+test("callback server reports OAuth errors without writing headers twice", async () => {
+  const { server, port, callback } = await _internal.startCallbackServer()
+  try {
+    const res = await fetch(`http://localhost:${port}/?error=access_denied`)
+    assert.equal(res.status, 200)
+    await res.text()
+    await assert.rejects(() => callback, /access_denied/)
+  } finally {
+    server.close()
+  }
 })
